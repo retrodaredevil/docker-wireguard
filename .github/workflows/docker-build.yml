@@ -1,0 +1,98 @@
+name: Create and publish a Docker image
+
+on:
+  push:
+    branches:
+      - main
+      - dev
+    tags:
+      - 'v*'
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: pouchdb-server
+
+jobs:
+  build-push:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      matrix:
+        data:
+          - version: 4.2.0
+            latest: !!bool true
+          - version: 4.1.0
+            latest: !!bool false
+      fail-fast: false
+    env:
+      platforms: ${{ github.ref == 'refs/heads/dev' && 'linux/amd64' || 'linux/amd64,linux/arm/v7,linux/arm64/v8,linux/ppc64le,linux/s390x' }}
+    steps:
+      # https://github.com/marketplace/actions/checkout
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      # https://github.com/marketplace/actions/docker-login
+      - name: Log in to the Container registry
+        uses: docker/login-action@v2.1.0
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      # https://github.com/marketplace/actions/docker-metadata-action
+      - name: Extract metadata (tags, labels) for Docker
+        id: meta
+        uses: docker/metadata-action@v4.3.0
+        with:
+          images: ${{ env.REGISTRY }}/${{ github.actor }}/${{ env.IMAGE_NAME }}
+          # expressions: https://docs.github.com/en/actions/learn-github-actions/expressions
+          tags: |
+            # major.minor and major enabled for latest PouchDB version
+            type=semver,pattern={{major}}.{{minor}},enable=${{ matrix.data.latest }}
+            type=semver,pattern={{major}},enable=${{ matrix.data.latest }}
+            
+            # major.minor-version and major-version where version is the PouchDB version
+            type=semver,pattern={{major}}.{{minor}},suffix=-${{ matrix.data.version }}
+            type=semver,pattern={{major}},suffix=-${{ matrix.data.version }}
+            
+            # latest and beta tags used on release only if latest PouchDB version
+            type=raw,value=latest,priority=750,enable=${{ matrix.data.latest && startsWith(github.ref, 'refs/tags/') && !contains(github.ref, 'rc') && !contains(github.ref, 'beta') }}
+            type=raw,value=beta,priority=740,enable=${{ matrix.data.latest && startsWith(github.ref, 'refs/tags/')}}
+            # latest and beta tags with suffixes
+            type=raw,value=latest,priority=750,enable=${{ startsWith(github.ref, 'refs/tags/') && !contains(github.ref, 'rc') && !contains(github.ref, 'beta') }},suffix=-${{ matrix.data.version }}
+            type=raw,value=beta,priority=740,enable=${{ startsWith(github.ref, 'refs/tags/')}},suffix=-${{ matrix.data.version }}
+            
+            # Unimportant tags typically used for developing
+            type=edge,branch=main,enable=${{ matrix.data.latest }}
+            type=raw,value=dev,enable=${{ matrix.data.latest && github.ref == 'refs/heads/dev' }}
+            type=sha,format=short,enable=${{ matrix.data.latest }}
+            
+            # Unimportant tags with suffixes
+            type=edge,branch=main,suffix=-${{ matrix.data.version }}
+            type=raw,value=dev,enable=${{ github.ref == 'refs/heads/dev' }},suffix=-${{ matrix.data.version }}
+            type=sha,format=short,suffix=-${{ matrix.data.version }}
+          # https://github.com/opencontainers/image-spec/blob/main/annotations.md#pre-defined-annotation-keys
+          labels: |
+            maintainer=retrodaredevil
+            org.opencontainers.image.title=PouchDB Server
+            org.opencontainers.image.description=PouchDB Server ${{ matrix.data.version }} running in docker
+            org.opencontainers.image.source=https://github.com/retrodaredevil/docker-pouchdb-server
+            org.opencontainers.image.ref.name=${{ matrix.data.image-name }}
+            org.opencontainers.image.vendor=retrodaredevil
+            org.opencontainers.image.url=https://github.com/retrodaredevil/docker-pouchdb-server
+            org.opencontainers.image.authors=retrodaredevil
+      # https://github.com/marketplace/actions/docker-setup-buildx
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
+      # https://github.com/marketplace/actions/build-and-push-docker-images
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v4.0.0
+        with:
+          context: .
+          build-args: |
+            VERSION=${{ matrix.data.version }}
+          push: true
+          platforms: ${{ env.platforms }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}

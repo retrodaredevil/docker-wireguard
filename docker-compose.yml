@@ -1,0 +1,14 @@
+services:
+  wireguard:
+    image: ghcr.io/retrodaredevil/wireguard
+    volumes:
+      - ./wireguard:/etc/wireguard:ro
+    deploy:  # https://docs.docker.com/compose/compose-file/compose-file-v3/#restart_policy
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+    cap_add:
+      - NET_ADMIN
+      - SYS_MODULE
+    sysctls:
+      - net.ipv4.ip_forward=1
